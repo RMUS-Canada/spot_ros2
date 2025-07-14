@@ -39,6 +39,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BatteryStateArray.msg"
   "msg/BehaviorFault.msg"
+  "msg/DockState.msg"
   "msg/EStopStateArray.msg"
   "msg/FootStateArray.msg"
   "msg/LeaseArray.msg"
@@ -99,6 +100,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GraphNavSetLocalization.srv"
   "srv/GraphNavGetLocalizationPose.srv"
   "srv/Dock.srv"
+  "srv/GetDockState.srv"
   "srv/GetGripperCameraParameters.srv"
   "srv/SetGripperCameraParameters.srv"
   "srv/OverrideGraspOrCarry.srv"

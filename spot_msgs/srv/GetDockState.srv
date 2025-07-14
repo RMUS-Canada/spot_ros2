@@ -1,0 +1,4 @@
+---
+spot_msgs/DockState state
+bool success
+string message

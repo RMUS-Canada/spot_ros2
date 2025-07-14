@@ -87,6 +87,7 @@ from spot_msgs.action import (  # type: ignore
     RobotCommand as RobotCommandAction,
 )
 from spot_msgs.msg import (  # type: ignore
+    DockState,
     Feedback,
     LeaseArray,
     LeaseResource,
@@ -103,6 +104,7 @@ from spot_msgs.srv import (  # type: ignore
     DeleteSound,
     Dock,
     GetChoreographyStatus,
+    GetDockState,
     GetGripperCameraParameters,
     GetLEDBrightness,
     GetLogpointStatus,
@@ -856,6 +858,22 @@ class SpotROS(Node):
             Dock,
             "dock",
             lambda request, response: self.service_wrapper("dock", self.handle_dock, request, response),
+            callback_group=self.group,
+        )
+        self.create_service(
+            GetDockState,
+            "get_dock_state",
+            lambda request, response: self.service_wrapper(
+                "get_dock_state", self.handle_get_dock_state, request, response
+            ),
+            callback_group=self.group,
+        )
+        self.create_service(
+            Trigger,
+            "remove_all_policies",
+            lambda request, response: self.service_wrapper(
+                "remove_all_policies", self.handle_remove_all_policies, request, response
+            ),
             callback_group=self.group,
         )
 
@@ -1854,6 +1872,38 @@ class SpotROS(Node):
             response.message = "Spot wrapper is undefined"
             return response
         response.success, response.message = self.spot_wrapper.spot_docking.dock(request.dock_id)
+        return response
+
+    def handle_get_dock_state(
+        self, request: GetDockState.Request, response: GetDockState.Response
+    ) -> GetDockState.Response:
+        """ROS service handler to get the dock state of the robot."""
+        if self.spot_wrapper is None:
+            response.success = False
+            response.message = "Spot wrapper is undefined"
+            return response
+        docking_proto = self.spot_wrapper.spot_docking.get_docking_state()
+
+        state = DockState()
+        state.status = docking_proto.status
+        state.dock_type = docking_proto.dock_type
+        state.dock_id = docking_proto.dock_id
+        state.power_status = docking_proto.power_status
+        response.state = state
+
+        response.success = True
+        response.message = "Success"
+        return response
+
+    def handle_remove_all_policies(self, request: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
+        """ROS service handler to remove all keepalive policies from the robot"""
+        if self.spot_wrapper is None:
+            response.success = False
+            response.message = "Spot wrapper is undefined"
+            return response
+        self.spot_wrapper.remove_all_policies()
+        response.success = True
+        response.message = "Success"
         return response
 
     def handle_max_vel(self, request: SetVelocity.Request, response: SetVelocity.Response) -> SetVelocity.Response:
