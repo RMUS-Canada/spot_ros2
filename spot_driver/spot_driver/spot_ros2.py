@@ -54,6 +54,7 @@ from bosdyn_msgs.msg import (
     Logpoint,
     ManipulationApiFeedbackResponse,
     MobilityCommandFeedback,
+    MobilityParamsStairsMode,
     PtzDescription,
     RobotCommand,
     RobotCommandFeedback,
@@ -69,7 +70,7 @@ from rclpy.impl import rcutils_logger
 from rclpy.publisher import Publisher
 from rclpy.timer import Rate
 from sensor_msgs.msg import JointState, PointCloud2, PointField
-from std_srvs.srv import SetBool, Trigger
+from std_srvs.srv import Trigger
 from synchros2.node import Node
 from synchros2.service import Serviced
 from synchros2.single_goal_action_server import SingleGoalActionServer
@@ -137,6 +138,7 @@ from spot_msgs.srv import (  # type: ignore
     SetLEDBrightness,
     SetLocomotion,
     SetPtzPosition,
+    SetStairsMode,
     SetStandHeight,
     SetVelocity,
     SetVolume,
@@ -364,6 +366,9 @@ class SpotROS(Node):
         self.declare_parameter("arm_cmd_duration", 1.0)
         self.declare_parameter("start_estop", False)
         self.declare_parameter("rgb_cameras", True)
+
+        # Declare rates for command polling
+        self.declare_parameter("poll_rate", 10.0)
 
         # Declare rates for the spot_ros2 publishers, which are combined to a dictionary
         self.declare_parameter("metrics_rate", 0.04)
@@ -632,9 +637,9 @@ class SpotROS(Node):
         )
 
         self.create_service(
-            SetBool,
-            "stair_mode",
-            lambda request, response: self.service_wrapper("stair_mode", self.handle_stair_mode, request, response),
+            SetStairsMode,
+            "stairs_mode",
+            lambda request, response: self.service_wrapper("stairs_mode", self.handle_stair_mode, request, response),
             callback_group=self.group,
         )
         self.create_service(
@@ -1030,6 +1035,7 @@ class SpotROS(Node):
         # Wait for an estop to be connected
         if self.spot_wrapper is not None and not self.start_estop.value:
             printed = False
+            poll_period_sec = 1.0 / self.get_parameter("poll_rate").value
             while self.spot_wrapper.is_estopped():
                 if not printed:
                     self.get_logger().warn(
@@ -1041,7 +1047,7 @@ class SpotROS(Node):
                         + COLOR_END,
                     )
                     printed = True
-                time.sleep(0.5)
+                time.sleep(poll_period_sec)
             self.get_logger().info("Found estop!")
 
         self.create_timer(1 / self.async_tasks_rate, self.step)
@@ -1846,18 +1852,36 @@ class SpotROS(Node):
             response.message = f"Error: {e}"
             return response
 
-    def handle_stair_mode(self, request: SetBool.Request, response: SetBool.Response) -> SetBool.Response:
+    def handle_stair_mode(
+        self, request: SetStairsMode.Request, response: SetStairsMode.Response
+    ) -> SetStairsMode.Response:
         """ROS service handler to set a stair mode to the robot."""
         if self.spot_wrapper is None:
             response.success = False
             response.message = "Spot wrapper is undefined"
             return response
         try:
-            mobility_params = self.spot_wrapper.get_mobility_params()
-            mobility_params.stair_hint = request.data
-            self.spot_wrapper.set_mobility_params(mobility_params)
-            response.success = True
-            response.message = "Success"
+            new_stairs_mode = request.stairs_mode.value
+            if new_stairs_mode in [
+                MobilityParamsStairsMode.STAIRS_MODE_OFF,
+                MobilityParamsStairsMode.STAIRS_MODE_ON,
+                MobilityParamsStairsMode.STAIRS_MODE_AUTO,
+                MobilityParamsStairsMode.STAIRS_MODE_PROHIBITED,
+            ]:
+                mobility_params = self.spot_wrapper.get_mobility_params()
+                mobility_params.stairs_mode = new_stairs_mode
+                self.spot_wrapper.set_mobility_params(mobility_params)
+                response.success = True
+                response.message = "Success"
+                return response
+            else:
+                raise ValueError(
+                    "Invalid Value: Stairs mode value must match one of the MobilityParamsStairsMode.msg values."
+                )
+
+        except ValueError as e:
+            response.success = False
+            response.message = "Error:{}".format(e)
             return response
         except Exception as e:
             response.success = False
@@ -2286,6 +2310,7 @@ class SpotROS(Node):
         time_to_send_command = 0.0
 
         index = 0
+        poll_period_sec = 1.0 / self.get_parameter("poll_rate").value
         while (
             rclpy.ok()
             and goal_handle.is_active
@@ -2312,7 +2337,7 @@ class SpotROS(Node):
             feedback = self._get_robot_command_feedback(goal_id)
             feedback_msg = RobotCommandAction.Feedback(feedback=feedback)
             goal_handle.publish_feedback(feedback_msg)
-            time.sleep(0.01)  # don't use rate here because we're already in a single thread
+            time.sleep(poll_period_sec)  # don't use rate here because we're already in a single thread
 
         result = RobotCommandAction.Result()
         if feedback is not None:
@@ -2418,6 +2443,7 @@ class SpotROS(Node):
                 raise Exception(err_msg)
 
         self.get_logger().info("Robot now executing goal " + str(goal_id))
+        poll_period_sec = 1.0 / self.get_parameter("poll_rate").value
         # The command is non-blocking, but we need to keep this function up in order to interrupt if a
         # preempt is requested and to return success if/when the robot reaches the goal. Also check the is_active to
         # monitor whether the timeout_cb has already aborted the command
@@ -2438,7 +2464,7 @@ class SpotROS(Node):
             feedback_msg = Manipulation.Feedback(feedback=feedback)
             goal_handle.publish_feedback(feedback_msg)
 
-            time.sleep(0.1)  # don't use rate here because we're already in a single thread
+            time.sleep(poll_period_sec)  # don't use rate here because we're already in a single thread
 
         # publish a final feedback
         result = Manipulation.Result()
@@ -2570,6 +2596,7 @@ class SpotROS(Node):
 
         # rate = rclpy.Rate(10)
 
+        poll_period_sec = 1.0 / self.get_parameter("poll_rate").value
         try:
             while rclpy.ok() and not self.spot_wrapper.trajectory_complete and goal_handle.is_active:
                 feedback = Trajectory.Feedback()
@@ -2583,7 +2610,7 @@ class SpotROS(Node):
 
                 # rate.sleep()
                 goal_handle.publish_feedback(feedback)
-                time.sleep(0.1)
+                time.sleep(poll_period_sec)
 
                 # check for timeout
                 com_dur = self.get_clock().now() - command_start_time
@@ -2894,6 +2921,7 @@ class SpotROS(Node):
         if self.spot_wrapper is None:
             return
 
+        poll_period_sec = 1.0 / self.get_parameter("poll_rate").value
         while rclpy.ok() and self.run_dance_feedback:
             res, msg, status = self.spot_wrapper.get_choreography_status()
             if res:
@@ -2905,7 +2933,7 @@ class SpotROS(Node):
                 if status == ChoreographyStatusResponse.Status.STATUS_COMPLETED_SEQUENCE:
                     break
 
-            time.sleep(0.01)
+            time.sleep(poll_period_sec)
 
     def handle_execute_dance(self, execute_dance_handle: ServerGoalHandle) -> ExecuteDance.Result:
         """ROS service handler for uploading and executing dance."""
@@ -2965,6 +2993,7 @@ class SpotROS(Node):
         if self.spot_wrapper is None:
             return
 
+        poll_period_sec = 1.0 / self.get_parameter("poll_rate").value
         while rclpy.ok() and self.run_navigate_to:
             localization_state = self.spot_wrapper._graph_nav_client.get_localization_state()
             if localization_state.localization.waypoint_id:
@@ -2972,7 +3001,7 @@ class SpotROS(Node):
                 feedback.waypoint_id = localization_state.localization.waypoint_id
                 if self.goal_handle is not None:
                     self.goal_handle.publish_feedback(feedback)
-            time.sleep(0.1)
+            time.sleep(poll_period_sec)
             # rclpy.Rate(10).sleep()
 
     def handle_navigate_to(self, goal_handle: ServerGoalHandle) -> NavigateTo.Result:
@@ -3132,7 +3161,7 @@ class SpotROS(Node):
                         mobility_params.body_control.base_offset_rt_footprint.points[0].pose.rotation.w
                     )
                     mobility_params_msg.locomotion_hint = mobility_params.locomotion_hint
-                    mobility_params_msg.stair_hint = mobility_params.stair_hint
+                    mobility_params_msg.stairs_mode = mobility_params.stairs_mode
                 except Exception as e:
                     self.get_logger().error("Error:{}".format(e))
                     pass
