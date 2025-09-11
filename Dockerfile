@@ -52,7 +52,7 @@ WORKDIR /ros_ws/src
 RUN rosdep init && rosdep update
 
 # Clone driver code
-RUN git clone https://github.com/bdaiinstitute/spot_ros2.git .
+RUN git clone https://github.com/RMUS-Canada/spot_ros2.git .
 RUN git submodule update --init --recursive
 
 # Run install script and pass in the architecture
@@ -62,3 +62,7 @@ RUN ARCH=$(dpkg --print-architecture) && echo "Building driver with $ARCH" && /r
 WORKDIR /ros_ws/
 RUN . /opt/ros/humble/setup.sh && \
     colcon build --symlink-install
+
+COPY spot_ros_config.yaml .
+
+CMD source install/setup.bash && ros2 launch spot_driver spot_driver.launch.py config_file:=spot_ros_config.yaml launch_image_publishers:=False
