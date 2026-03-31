@@ -56,6 +56,9 @@ RUN rosdep init && rosdep update
 RUN git clone https://github.com/RMUS-Canada/spot_ros2.git .
 RUN git submodule update --init --recursive
 
+# Remove COLCON_IGNORE files checked into the repo so all packages get built
+RUN find /ros_ws/src -name COLCON_IGNORE -delete
+
 # Run install script and pass in the architecture
 RUN ARCH=$(dpkg --print-architecture) && echo "Building driver with $ARCH" && /ros_ws/src/install_spot_ros2.sh --$ARCH
 
