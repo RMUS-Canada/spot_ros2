@@ -3,9 +3,9 @@
 /**:
   ros__parameters:
     # Spot Login Information
-    username: "admin"
-    password: "3o3s6vtytk9i"
-    hostname: "192.168.50.3"
+    username: ""  # Set via BOSDYN_CLIENT_USERNAME env var
+    password: ""  # Set via BOSDYN_CLIENT_PASSWORD env var
+    hostname: ""  # Set via SPOT_IP env var
 
     # Status Updates from Spot
     metrics_rate: 0.04
